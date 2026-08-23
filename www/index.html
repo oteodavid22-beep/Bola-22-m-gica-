@@ -98,4 +98,90 @@
 
   // white circle with 22
   const canvas22 = document.createElement('canvas'); canvas22.width=512; canvas22.height=512; const ctx22 = canvas22.getContext('2d');
-  ctx22.fillStyle='#ffffff'; ctx22.beginPath(); ctx22.arc(256,256,200,0,Math.PI*2); ctx22.fill(); ctx22.fillStyle='#000000'; ctx22.font='Bold 220px Arial'; ctx22.textAlign='center';
+  ctx22.fillStyle='#ffffff'; ctx22.beginPath(); ctx22.arc(256,256,200,0,Math.PI*2); ctx22.fill(); ctx22.fillStyle='#000000'; ctx22.font='Bold 220px Arial'; ctx22.textAlign='center'; ctx22.textBaseline='middle'; ctx22.fillText('22',256,260);
+  const poolTag = new THREE.Mesh(new THREE.PlaneGeometry(1.6,1.6), new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(canvas22), transparent:true})); poolTag.position.z=2.01; ballGroup.add(poolTag);
+
+  const windowGroup = new THREE.Group(); windowGroup.position.z=-2; windowGroup.rotation.y=Math.PI; ballGroup.add(windowGroup);
+  const frameMesh = new THREE.Mesh(new THREE.RingGeometry(0.85,1.1,32), new THREE.MeshBasicMaterial({color:0x111111})); frameMesh.position.z=0.02; windowGroup.add(frameMesh);
+  const glassMesh = new THREE.Mesh(new THREE.CircleGeometry(0.85,32), new THREE.MeshBasicMaterial({color:0x001a4d, transparent:true, opacity:0.85})); glassMesh.position.z=0.01; windowGroup.add(glassMesh);
+
+  const dieGroup = new THREE.Group(); dieGroup.position.set(0,0,-1.0); windowGroup.add(dieGroup);
+  const responseCanvas = document.createElement('canvas'); responseCanvas.width=512; responseCanvas.height=512; const responseCtx = responseCanvas.getContext('2d'); const responseTexture = new THREE.CanvasTexture(responseCanvas);
+
+  function updateResponseTexture(text){
+    responseCtx.clearRect(0,0,512,512);
+    responseCtx.fillStyle='#0044ff'; responseCtx.beginPath(); responseCtx.moveTo(256,50); responseCtx.lineTo(460,410); responseCtx.lineTo(52,410); responseCtx.closePath(); responseCtx.fill();
+    responseCtx.strokeStyle='#66a3ff'; responseCtx.lineWidth=10; responseCtx.stroke();
+    responseCtx.fillStyle='#ffffff'; responseCtx.font='Bold 40px Arial'; responseCtx.textAlign='center'; responseCtx.textBaseline='middle';
+    const words = text.split(' ');
+    if(words.length<=2){ responseCtx.fillText(text,256,290); } else { const mid=Math.ceil(words.length/2); responseCtx.fillText(words.slice(0,mid).join(' '),256,260); responseCtx.fillText(words.slice(mid).join(' '),256,320); }
+    responseTexture.needsUpdate = true;
+  }
+
+  const triangleMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.3,1.3), new THREE.MeshBasicMaterial({map:responseTexture, transparent:true})); triangleMesh.position.z=0.05; dieGroup.add(triangleMesh);
+
+  // Audio
+  let audioCtx = null;
+  function initAudio(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==='suspended') audioCtx.resume(); }
+  function playButtonClickSound(){ initAudio(); const osc=audioCtx.createOscillator(); const gain=audioCtx.createGain(); osc.type='sine'; osc.frequency.setValueAtTime(800,audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(200,audioCtx.currentTime+0.05); gain.gain.setValueAtTime(0.25,audioCtx.currentTime); gain.gain.linearRampToValueAtTime(0.01,audioCtx.currentTime+0.05); osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime+0.06); }
+  function playFluidSound(){ initAudio(); const bufferSize = Math.floor(audioCtx.sampleRate * 0.5); const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate); const data = buffer.getChannelData(0); for(let i=0;i<bufferSize;i++) data[i]=Math.random()*2-1; const noise = audioCtx.createBufferSource(); noise.buffer = buffer; const filter = audioCtx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.setValueAtTime(150,audioCtx.currentTime); filter.frequency.linearRampToValueAtTime(450,audioCtx.currentTime+0.25); filter.frequency.linearRampToValueAtTime(120,audioCtx.currentTime+0.5); const gain = audioCtx.createGain(); gain.gain.setValueAtTime(0.45,audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01,audioCtx.currentTime+0.5); noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination); noise.start(); }
+  function playImpactSound(){ initAudio(); const osc=audioCtx.createOscillator(); const gain=audioCtx.createGain(); osc.type='triangle'; osc.frequency.setValueAtTime(120,audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(30,audioCtx.currentTime+0.1); gain.gain.setValueAtTime(0.5,audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01,audioCtx.currentTime+0.1); osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime+0.12); }
+
+  // Interaction
+  let isAnimating=false; let targetRotationY=0; let resetTimer=null;
+  function askOracle(){
+    const qInput=document.getElementById('question');
+    if(!qInput.value.trim()){ alert('Haz una pregunta primero.'); return; }
+    if(isAnimating) return;
+    lastQuestion = qInput.value.trim(); document.getElementById('shareBtn').style.display='none';
+    playButtonClickSound(); if(resetTimer) clearTimeout(resetTimer);
+    isAnimating=true; playFluidSound(); if('vibrate' in navigator) navigator.vibrate([50,40,80]);
+    const pack = answerPacks[currentMode]; lastAnswer = pack[Math.floor(Math.random()*pack.length)]; updateResponseTexture(lastAnswer);
+    targetRotationY = Math.PI; let startTime = performance.now(); let impactPlayed=false;
+
+    function animateSequence(){
+      let elapsed = (performance.now()-startTime)/1000;
+      if(elapsed < 0.5){ dieGroup.position.z = -1.0; ballGroup.rotation.z = Math.sin(elapsed * 25) * 0.05; requestAnimationFrame(animateSequence);
+      } else if(elapsed < 1.8){ let progress = (elapsed - 0.5)/1.3; dieGroup.position.z = THREE.MathUtils.lerp(-1.0, -0.01, Math.pow(progress,0.6)); ballGroup.rotation.z = THREE.MathUtils.lerp(ballGroup.rotation.z,0,0.1); if(progress>0.85 && !impactPlayed){ playImpactSound(); impactPlayed=true; } requestAnimationFrame(animateSequence);
+      } else { ballGroup.rotation.z = 0; dieGroup.position.z = -0.01; isAnimating=false; document.getElementById('shareBtn').style.display='inline-block'; resetTimer = setTimeout(()=>{ targetRotationY = 0; isAnimating = true; document.getElementById('shareBtn').style.display='none'; let resetStart = performance.now(); function animateReset(){ let rElapsed = (performance.now()-resetStart)/1000; if(rElapsed<1.2){ ballGroup.rotation.y = THREE.MathUtils.lerp(ballGroup.rotation.y, 0, 0.05); ballGroup.rotation.x = THREE.MathUtils.lerp(ballGroup.rotation.x, 0, 0.05); requestAnimationFrame(animateReset);} else { ballGroup.rotation.y = 0; ballGroup.rotation.x = 0; dieGroup.position.z = -1.0; isAnimating=false; } } animateReset(); }, 10000); }
+    }
+    animateSequence();
+  }
+
+  function handleKey(e){ if(e.key === 'Enter') askOracle(); }
+
+  // Share / sticker render
+  function shareResult(){
+    const shareCanvas = document.createElement('canvas'); shareCanvas.width=1080; shareCanvas.height=1080; const sCtx = shareCanvas.getContext('2d');
+    sCtx.fillStyle = '#08090c'; sCtx.fillRect(0,0,1080,1080);
+    // render current three.js frame to the canvas by drawing renderer.domElement
+    renderer.render(scene, camera);
+    try { sCtx.drawImage(renderer.domElement, 40, 140, 1000, 800); } catch(e){ /* some browsers block drawing WebGL canvas cross-origin; ignore */ }
+    sCtx.fillStyle = '#ffffff'; sCtx.font = 'Bold 42px sans-serif'; sCtx.textAlign='center'; sCtx.fillText(`"${lastQuestion || ''}"`, 540, 100);
+    sCtx.fillStyle = '#66a3ff'; sCtx.font = '30px sans-serif'; sCtx.fillText(`Bola 22 Mágica • Modo ${currentMode.toUpperCase()}`, 540, 1020);
+
+    shareCanvas.toBlob(blob => {
+      if(!blob) return;
+      const file = new File([blob], 'bola22_respuesta.png', { type: 'image/png' });
+      if(navigator.share && navigator.canShare && navigator.canShare({ files: [file] })){ navigator.share({ title: 'Mi respuesta de Bola 22', text: `Pregunté "${lastQuestion}" y la Bola 22 respondió: ${lastAnswer}`, files: [file] }).catch(()=>{}); }
+      else { const link = document.createElement('a'); link.download='bola22_respuesta.png'; link.href = URL.createObjectURL(blob); link.click(); URL.revokeObjectURL(link.href); }
+    }, 'image/png');
+  }
+
+  // pointer controls
+  let isDragging=false; let prevMouse={x:0,y:0};
+  container.addEventListener('pointerdown', (e)=>{ initAudio(); if(resetTimer) clearTimeout(resetTimer); isDragging=true; prevMouse = {x:e.clientX, y:e.clientY}; });
+  window.addEventListener('pointermove', (e)=>{ if(!isDragging || isAnimating) return; ballGroup.rotation.y += (e.clientX - prevMouse.x) * 0.01; ballGroup.rotation.x += (e.clientY - prevMouse.y) * 0.01; targetRotationY = ballGroup.rotation.y; prevMouse = {x:e.clientX, y:e.clientY}; });
+  window.addEventListener('pointerup', ()=> isDragging = false);
+
+  // render loop
+  function animate(){ requestAnimationFrame(animate); if(isAnimating){ ballGroup.rotation.y = THREE.MathUtils.lerp(ballGroup.rotation.y, targetRotationY, 0.08); ballGroup.rotation.x = THREE.MathUtils.lerp(ballGroup.rotation.x, 0, 0.08); } if(!isAnimating && dieGroup.position.z > -0.2){ dieGroup.position.y = Math.sin(Date.now()*0.002)*0.012; } renderer.render(scene, camera); }
+  updateResponseTexture('HAZ UNA PREGUNTA'); animate();
+
+  window.addEventListener('resize', ()=>{ camera.aspect = container.clientWidth / Math.max(container.clientHeight,200); camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight); });
+
+  // Service worker registration
+  if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
+  </script>
+</body>
+</html>
